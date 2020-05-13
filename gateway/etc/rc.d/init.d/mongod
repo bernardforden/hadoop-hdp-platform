@@ -1,0 +1,111 @@
+#!/bin/sh
+#
+
+
+PATH=/usr/local/mongodb/bin:/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
+MONGOHOME="/usr/local/mongodb"
+DAEMON=$MONGOHOME/bin/mongod
+CONFIGFILE="/etc/mongod.conf"
+DBPATH=`awk -F= '/^dbpath[ ]*=/{print $2}' "$CONFIGFILE" |sed -e 's/^[ ]*//'`
+LOGPATH=`awk -F= '/^logpath[ ]*=/{print $2}' "$CONFIGFILE" |sed -e 's/^[ ]*//'`
+LOGDIR=$(cd $(dirname $LOGPATH); pwd)
+DAEMON_OPTS="--config $CONFIGFILE"
+
+NAME=MongoDB
+DESC=database
+mongod=${MONGOD-$DAEMON}
+
+if [ -f /etc/init.d/functions ]; then
+    . /etc/init.d/functions
+elif [ -f /etc/rc.d/init.d/functions ]; then
+    . /etc/rc.d/init.d/functions
+else
+    exit 0
+fi
+
+. /etc/sysconfig/network
+
+[ ${NETWORKING} = "no" ] && exit 0
+
+RETVAL=0
+
+#test -x $DAEMON || exit 0
+
+if [ ! -d "$LOGDIR" ]; then
+  mkdir $LOGDIR
+  chown mongo:mongo $LOGDIR
+fi
+
+PIDFILE=/var/run/$NAME.pid
+DIETIME=10                   # Time to wait for the server to die, in seconds
+                            # If this value is set too low you might not
+                            # let some servers to die gracefully and
+                            # 'restart' will not work
+
+LOGFILE=$LOGDIR/$NAME.log  # Server logfile
+
+# Include mongodb defaults if available
+if [ -f /etc/default/$NAME ] ; then
+    . /etc/default/$NAME
+fi
+
+DAEMONUSER=mongo
+# Check that the user exists (if we set a user)
+# Does the user exist?
+if [ -n "$DAEMONUSER" ] ; then
+    if getent passwd | grep -q "^$DAEMONUSER:"; then
+        # Obtain the uid and gid
+        DAEMONUID=`getent passwd |grep "^$DAEMONUSER:" | awk -F : '{print $3}'`
+        DAEMONGID=`getent passwd |grep "^$DAEMONUSER:" | awk -F : '{print $4}'`
+    else
+        echo -n "The user $DAEMONUSER, required to run $NAME does not exist."
+        exit 1
+    fi
+fi
+
+usage() {
+  echo "Usage: $0 {start|stop|restart|status}"
+  exit 0
+}
+
+if [ $# != 1 ]; then
+  usage
+fi
+
+start() {
+  echo -n $"Starting mongod: "
+  daemon --user $DAEMONUSER --pidfile $PIDFILE $DAEMON $DAEMON_OPTS
+  RETVAL=$?
+  echo
+  [ $RETVAL -eq 0 ] && touch /var/lock/subsys/mongod
+}
+
+stop() {
+  echo -n $"Stopping mongod: "
+  killproc -p "$DBPATH"/mongod.lock -d 300 "$COMMAND"
+  RETVAL=$?
+  echo
+  [ $RETVAL -eq 0 ] && rm -f /var/lock/subsys/mongod
+}
+
+case "$1" in
+  start)
+    start
+    ;;
+  stop)
+    stop
+    ;;
+  restart)
+    stop
+    start
+    ;;
+  status)
+    status $mongod
+    RETVAL=$?
+    ;;
+  * )
+    usage
+    ;;
+esac
+
+exit 0
